@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace AliFsmnVadSharp.Model
+namespace AliFsmnSharp.Model
 {
     internal class E2EVadFrameProbEntity
     {
