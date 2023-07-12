@@ -41,7 +41,9 @@ public class UnitTests {
         const string audioFilePath =
             @"G:\Source\CSharp\EasyPathology\EasyPathology.Inference\Resources\Vad-16k\肾水样变性.wav";
 
-        var vad = new FsmnVad(@"G:\Source\CSharp\EasyPathology\EasyPathology.Inference\Resources\Vad-16k");
+        var vad = new FsmnVad(
+            @"G:\Source\CSharp\EasyPathology\EasyPathology.Inference\Resources\Vad-16k",
+            4);
         using var reader = new AudioFileReader(audioFilePath);
         Assert.Multiple(() => {
             Assert.That(reader.WaveFormat.Channels, Is.EqualTo(1));
@@ -62,23 +64,23 @@ public class UnitTests {
         Console.WriteLine($"Read wav costs {sw.ElapsedMilliseconds}ms");
         sw.Restart();
         
-        var result = vad.GetSegmentsByStep(new[] { floatArray })[0];
+        var result = vad.Inference(floatArray).ToArray();
         Console.WriteLine($"Vad costs {sw.ElapsedMilliseconds}ms");
         sw.Restart();
         
         var sampleRate = reader.WaveFormat.SampleRate;
         var channels = reader.WaveFormat.Channels;
-        var segments = new float[result.TimeWindows.Count][];
-        for (var i = 0; i < result.TimeWindows.Count; i++) {
-            var window = result.TimeWindows[i];
+        var segments = new float[result.Length][];
+        for (var i = 0; i < result.Length; i++) {
+            var window = result[i];
 
             // 计算开始和结束的样本索引
-            var startSampleIndex = (int)(window.Start.TotalSeconds * sampleRate);
-            var endSampleIndex = (int)(window.End.TotalSeconds * sampleRate);
+            var startSampleIndex = window.Start.TotalSeconds * sampleRate;
+            var endSampleIndex = window.End.TotalSeconds * sampleRate;
 
             // 计算开始和结束的浮点数索引
-            var startFloatIndex = startSampleIndex * channels;
-            var endFloatIndex = endSampleIndex * channels;
+            var startFloatIndex = (int)(startSampleIndex * channels);
+            var endFloatIndex = (int)(endSampleIndex * channels);
 
             // 切割对应的浮点数数组
             var length = endFloatIndex - startFloatIndex;
@@ -92,7 +94,8 @@ public class UnitTests {
         var paraformer =
             new Paraformer(
                 @"G:\Source\CSharp\EasyPathology\EasyPathology.Inference\Resources\Paraformer-large",
-                batchSize: 1);
+                batchSize: 1,
+                intraOpNumThreads: 4);
         var results = paraformer.Inference(segments).ToArray();
         Console.WriteLine($"Inference costs {sw.ElapsedMilliseconds}ms\n");
         Console.WriteLine(string.Join("\n", results));

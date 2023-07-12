@@ -310,7 +310,7 @@ internal class E2EVadModel {
         return frame_state;
     }
 
-    public SegmentEntity? DefaultCall(float[,,] score, float[] waveform,
+    public TimeWindow[] DefaultCall(float[,,] score, float[] waveform,
         bool isFinal = false, int maxEndSil = 800, bool online = false) {
         _max_end_sil_frame_cnt_thresh = maxEndSil - _vad_opts.speech_to_sil_time_thres;
         // compute decibel for each frame
@@ -321,7 +321,6 @@ internal class E2EVadModel {
         else
             DetectLastFrames();
 
-        SegmentEntity? segment = null;
         var timeWindowBatch = new List<TimeWindow>();
         if (_output_data_buf.Count > 0)
             for (var i = _output_data_buf_offset; i < _output_data_buf.Count; i++) {
@@ -356,16 +355,11 @@ internal class E2EVadModel {
                     TimeSpan.FromMilliseconds(endMs)));
             }
 
-        if (timeWindowBatch.Count > 0) {
-            segment = new SegmentEntity();
-            segment.TimeWindows.AddRange(timeWindowBatch);
-        }
-
         if (isFinal)
             // reset class variables and clear the dict for the next query
             AllResetDetection();
 
-        return segment;
+        return timeWindowBatch.ToArray();
     }
 
     private int DetectCommonFrames() {

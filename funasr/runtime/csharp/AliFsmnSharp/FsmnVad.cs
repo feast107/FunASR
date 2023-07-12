@@ -30,85 +30,77 @@ public class FsmnVad {
         encoderConfig = vadYamlEntity.encoder_conf;
     }
 
-    //public SegmentEntity[] GetSegments(IEnumerable<float[]> samplesList) {
-    //    var segments = new List<SegmentEntity>();
-    //    foreach (var samplesBatch in samplesList.Chunk(_batchSize)) {
-    //        try {
-    //            var vadInputEntities = ExtractFeats(samplesBatch);
-    //            var vadOutputEntities = Infer(vadInputEntities);
-    //            for (var i = 0; i < vadOutputEntities.Count; i++) {
-    //                var scores = vadOutputEntities[i].Scores;
-    //                var segment = vadInputEntities[i].VadScorer.DefaultCall(
-    //                    scores, samplesBatch[i], true, maxEndSil);
-    //                
-    //                if (segment == null) continue;
-    //                
-    //                var segmentEntity = new SegmentEntity();
-    //                segmentEntity.Segment.AddRange(segment.Segment);
-    //                segments.Add(segmentEntity);
-    //            }
-    //        } catch (OnnxRuntimeException) { }
-    //    }
-    //
-    //    return segments.ToArray();
-    //}
+    private IEnumerable<TimeWindow[]> GetSegments(float[] samples) {
+        var (feats, featsCount) = frontend.ExtractFeat(new[] { samples });
+        var inCaches = PrepareCache();
+        var i = 0;
+        var cacheTensors = inCaches.Select(cache => new {
+                cache, cacheDim = new[] { 1, 128, cache.Length / 128 / 1, 1 }
+            })
+            .Select(p => new DenseTensor<float>(p.cache, p.cacheDim))
+            .Select(cacheTensor => NamedOnnxValue.CreateFromTensor($"in_cache{i++}", cacheTensor))
+            .ToList();
 
-    public SegmentEntity[] GetSegmentsByStep(IEnumerable<float[]> samplesList) {
-        var segments = new List<SegmentEntity>();
-        foreach (var samplesBatch in samplesList) {
-            var (feats, featsCount) = frontend.ExtractFeat(new[] { samplesBatch });
-            var inCaches = PrepareCache();
-            var cacheTensors = new List<NamedOnnxValue>();
-            var i = 0;
-            foreach (var cacheTensor in inCaches
-                         .Select(cache => new { cache, cacheDim = new[] { 1, 128, cache.Length / 128 / 1, 1 } })
-                         .Select(p => new DenseTensor<float>(p.cache, p.cacheDim))) {
-                cacheTensors.Add(NamedOnnxValue.CreateFromTensor("in_cache" + i, cacheTensor));
-                i++;
+        var featsLen = featsCount[0];
+        var step = Math.Min(featsCount.Max(), 6000);
+        for (var tOffset = 0; tOffset < featsLen; tOffset += Math.Min(step, featsLen - tOffset)) {
+            bool isFinal;
+            if (tOffset + step >= featsLen - 1) {
+                step = featsLen - tOffset;
+                isFinal = true;
+            } else {
+                isFinal = false;
             }
 
+            var inputStep = GetFeatPackage(feats, featsLen, 400, tOffset, step);
+            var speechDim = session.InputMetadata["speech"].Dimensions;
+            speechDim[1] = inputStep.Length / speechDim[2];
+
+            var container = new List<NamedOnnxValue>();
+            var tensor = new DenseTensor<float>(inputStep, speechDim);
+            cacheTensors.Add(NamedOnnxValue.CreateFromTensor("speech", tensor));
+            container.AddRange(cacheTensors);
+
+            DisposableNamedOnnxValue[] results;
             try {
-                var featsLen = featsCount[0];
-                var step = Math.Min(featsCount.Max(), 6000);
-                for (var tOffset = 0; tOffset < featsLen; tOffset += Math.Min(step, featsLen - tOffset)) {
-                    bool isFinal;
-                    if (tOffset + step >= featsLen - 1) {
-                        step = featsLen - tOffset;
-                        isFinal = true;
-                    } else {
-                        isFinal = false;
-                    }
+                results = session.Run(container).ToArray();
+            } catch (OnnxRuntimeException) {
+                yield break;
+            }
 
-                    var inputStep = GetFeatPackage(feats, featsLen, 400, tOffset, step);
-                    var speechDim = session.InputMetadata["speech"].Dimensions;
-                    speechDim[1] = inputStep.Length / speechDim[2];
+            var logits = results[0].AsTensor<float>().ToDenseTensor();
+            var scores = DimOneToThree(logits.Buffer.Span, 1, logits.Dimensions[1]);
+            var vadOutputEntity = new VadOutputEntity(scores);
+            foreach (var result in results[1..]) {
+                vadOutputEntity.OutCaches.Add(result.AsEnumerable<float>().ToArray());
+            }
 
-                    var container = new List<NamedOnnxValue>();
-                    var tensor = new DenseTensor<float>(inputStep, speechDim);
-                    cacheTensors.Add(NamedOnnxValue.CreateFromTensor("speech", tensor));
-                    container.AddRange(cacheTensors);
-
-                    var results = session.Run(container).ToArray();
-                    var logits = results[0].AsTensor<float>().ToDenseTensor();
-                    var scores = DimOneToThree(logits.Buffer.Span, 1, logits.Dimensions[1]);
-                    var vadOutputEntity = new VadOutputEntity(scores);
-                    foreach (var result in results.Skip(1)) {
-                        vadOutputEntity.OutCaches.Add(result.AsEnumerable<float>().ToArray());
-                    }
-
-                    var waveform = GetWaveformPackage(samplesBatch, tOffset, step);
-                    var segment = vadScorer.DefaultCall(scores, waveform, isFinal, maxEndSil);
-
-                    if (segment == null) continue;
-
-                    var segmentEntity = new SegmentEntity();
-                    segmentEntity.TimeWindows.AddRange(segment.TimeWindows);
-                    segments.Add(segmentEntity);
-                }
-            } catch (OnnxRuntimeException) { }
+            var waveform = GetWaveformPackage(samples, tOffset, step);
+            var segments = vadScorer.DefaultCall(scores, waveform, isFinal, maxEndSil);
+            if (segments.Length == 0) {
+                continue;
+            }
+            
+            yield return segments;
         }
+    }
+    
+    public IEnumerable<TimeWindow> Inference(float[] samples) {
+        using var enumerator = GetSegments(samples).GetEnumerator();
+        while (enumerator.MoveNext()) {
+            foreach (var timeWindow in enumerator.Current) {
+                yield return timeWindow;
+            }
+        }
+    }
 
-        return segments.ToArray();
+    public async IAsyncEnumerable<TimeWindow> InferenceAsync(float[] samples) {
+        using var enumerator = GetSegments(samples).GetEnumerator();
+        while (await Task.Run(enumerator.MoveNext)) {
+            foreach (var timeWindow in enumerator.Current) {
+                yield return timeWindow;
+            }
+        }
     }
 
     private List<float[]> PrepareCache() {

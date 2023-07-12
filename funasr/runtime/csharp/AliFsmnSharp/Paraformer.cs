@@ -81,7 +81,7 @@ public class Paraformer {
         for (var i = 0; i < amScoreDimensions[0]; i++) {
             var sliceLength = amScoreDimensions[1] * amScoreDimensions[2];
             results.Add(DecodeOne(
-                amScores.Slice(i * sliceLength, (i + 1) * sliceLength),
+                amScores.Slice(i * sliceLength, sliceLength),
                 amScoreDimensions[1..],
                 validTokenLengths[i]));
         }
