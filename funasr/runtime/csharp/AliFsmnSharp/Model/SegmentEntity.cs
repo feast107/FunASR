@@ -4,19 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace AliFsmnSharp.Model
-{
-    public class SegmentEntity
-    {
-        private List<int[]> _segment=new List<int[]>();
-        private List<float[]> _waveform=new List<float[]>();
+namespace AliFsmnSharp.Model;
 
-        public List<int[]> Segment { get => _segment; set => _segment = value; }
-        public List<float[]> Waveform { get => _waveform; set => _waveform = value; }
-        //public SegmentEntity()
-        //{
-        //    int[] t=new int[0];
-        //    _segment.Add(t);
-        //}
-    }
+public class SegmentEntity {
+    public List<TimeWindow> TimeWindows { get; } = new();
 }

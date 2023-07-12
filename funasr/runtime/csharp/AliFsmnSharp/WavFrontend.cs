@@ -22,8 +22,42 @@ internal class WavFrontend {
             _cmvnEntity = LoadCmvn(mvnFilePath);
         }
     }
+    
+    public (float[], int[]) ExtractFeat(float[][] samplesBatch) {
+        var feats = new float[samplesBatch.Length][][];
+        var featsCount = new int[samplesBatch.Length];
+        for (var i = 0; i < samplesBatch.Length; i++) {
+            var speech = GetFbank(samplesBatch[i]);
+            var feat = feats[i] = LfrCmvn(speech);
+            featsCount[i] = feat.Length;
+        }
 
-    public float[][] GetFbank(float[] samples) {
+        return (PadFeats(feats, featsCount.Max()), featsCount);
+    }
+
+    private static float[] PadFeats(float[][][] feats, int maxFeatLen) {
+        return feats.SelectMany(feat => PadFeat(feat, maxFeatLen)).ToArray();
+    }
+
+    private static float[] PadFeat(float[][] feat, int maxFeatLen) {
+        var curLen = feat.Length;
+        if (curLen >= maxFeatLen) {
+            return feat.SelectMany(x => x).ToArray();
+        }
+
+        var paddedFeat = new List<float>(maxFeatLen * feat[0].Length);
+
+        // Add original elements
+        paddedFeat.AddRange(feat.SelectMany(x => x));
+
+        // Add padding
+        var padding = new float[(maxFeatLen - curLen) * feat[0].Length];
+        paddedFeat.AddRange(padding);
+
+        return paddedFeat.ToArray();
+    }
+
+    private float[][] GetFbank(float[] samples) {
         float sampleRate = _frontendConfEntity.fs;
         samples = samples.Select(x => x * 32768f).ToArray();
         var knfOnlineFbank = KaldiNativeFbank.GetOnlineFbank(_opts);
@@ -36,14 +70,14 @@ internal class WavFrontend {
             KaldiNativeFbank.GetFbank(knfOnlineFbank, i, ref fbankData);
             fbank[i] = new float[_frontendConfEntity.n_mels];
             Marshal.Copy(fbankData.data, fbank[i], 0,
-                Math.Min(fbankData.data_length / sizeof(float), fbank[i].Length));
+                Math.Min(fbankData.data_length, fbank[i].Length));
             fbankData.data = IntPtr.Zero;
         }
 
         return fbank;
     }
 
-    public float[][] LfrCmvn(float[][] features) {
+    private float[][] LfrCmvn(float[][] features) {
         if (_frontendConfEntity.lfr_m != 1 || _frontendConfEntity.lfr_n != 1) {
             features = ApplyLfr(features, _frontendConfEntity.lfr_m, _frontendConfEntity.lfr_n);
         }
@@ -97,8 +131,7 @@ internal class WavFrontend {
 
         return inputs;
     }
-
-
+    
     private CmvnEntity LoadCmvn(string mvnFilePath) {
         var meansList = new List<float>();
         var varsList = new List<float>();

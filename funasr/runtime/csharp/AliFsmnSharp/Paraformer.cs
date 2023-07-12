@@ -44,11 +44,11 @@ public class Paraformer {
     /// <param name="samplesList"></param>
     public IEnumerable<string> Inference(IEnumerable<float[]> samplesList) {
         foreach (var samplesBatch in samplesList.Chunk(batchSize)) {
-            var (feats, featsCount) = ExtractFeat(samplesBatch);
+            var (feats, featsCount) = frontend.ExtractFeat(samplesBatch);
 
             var speechDim = session.InputMetadata["speech"].Dimensions;
-            speechDim[0] = batchSize;
-            speechDim[1] = feats.Length / batchSize / speechDim[2];
+            speechDim[0] = samplesBatch.Length;
+            speechDim[1] = feats.Length / samplesBatch.Length / speechDim[2];
 
             var speechLengthsDim = session.InputMetadata["speech_lengths"].Dimensions;
             speechLengthsDim[0] = featsCount.Length;
@@ -71,41 +71,9 @@ public class Paraformer {
         }
     }
 
-    private (float[], int[]) ExtractFeat(float[][] samplesBatch) {
-        var feats = new float[samplesBatch.Length][][];
-        var featsCount = new int[samplesBatch.Length];
-        for (var i = 0; i < samplesBatch.Length; i++) {
-            var speech = frontend.GetFbank(samplesBatch[i]);
-            var feat = feats[i] = frontend.LfrCmvn(speech);
-            featsCount[i] = feat.Length;
-        }
-
-        return (PadFeats(feats, featsCount.Max()), featsCount);
-    }
-
-    private static float[] PadFeats(float[][][] feats, int maxFeatLen) {
-        return feats.SelectMany(feat => PadFeat(feat, maxFeatLen)).ToArray();
-    }
-
-    private static float[] PadFeat(float[][] feat, int maxFeatLen) {
-        var curLen = feat.Length;
-        if (curLen >= maxFeatLen) {
-            return feat.SelectMany(x => x).ToArray();
-        }
-
-        var paddedFeat = new List<float>(maxFeatLen * feat[0].Length);
-
-        // Add original elements
-        paddedFeat.AddRange(feat.SelectMany(x => x));
-
-        // Add padding
-        var padding = new float[(maxFeatLen - curLen) * feat[0].Length];
-        paddedFeat.AddRange(padding);
-
-        return paddedFeat.ToArray();
-    }
-
-    private List<string[]> Decode(Memory<float> amScores, ReadOnlySpan<int> amScoreDimensions,
+    private List<string[]> Decode(
+        Memory<float> amScores, 
+        ReadOnlySpan<int> amScoreDimensions,
         int[] validTokenLengths) {
         var results = new List<string[]>();
 
