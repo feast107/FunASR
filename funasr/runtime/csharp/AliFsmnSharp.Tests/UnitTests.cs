@@ -75,8 +75,8 @@ public class UnitTests {
             var window = result[i];
 
             // 计算开始和结束的样本索引
-            var startSampleIndex = window.Start.TotalSeconds * sampleRate;
-            var endSampleIndex = window.End.TotalSeconds * sampleRate;
+            var startSampleIndex = window.BeginTime.TotalSeconds * sampleRate;
+            var endSampleIndex = window.EndTime.TotalSeconds * sampleRate;
 
             // 计算开始和结束的浮点数索引
             var startFloatIndex = (int)(startSampleIndex * channels);

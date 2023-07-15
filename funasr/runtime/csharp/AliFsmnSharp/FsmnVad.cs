@@ -5,7 +5,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace AliFsmnSharp;
 
-public class FsmnVad {
+public sealed class FsmnVad : IDisposable {
     private readonly InferenceSession session;
     private readonly WavFrontend frontend;
     private readonly int maxEndSil;
@@ -165,5 +165,9 @@ public class FsmnVad {
         }
 
         return threeDimObj;
+    }
+
+    public void Dispose() {
+        session.Dispose();
     }
 }

@@ -11,7 +11,7 @@ namespace AliFsmnSharp;
 /// <remarks>
 /// 输入的音频需要是<see cref="SampleRate"/>采样率的单声道32位浮点型PCM音频
 /// </remarks>
-public class Paraformer {
+public sealed class Paraformer : IDisposable {
     private readonly AsrYamlEntity config;
     private readonly WavFrontend frontend;
     private readonly TokenIdConverter converter;
@@ -133,5 +133,9 @@ public class Paraformer {
         }
 
         return result;
+    }
+
+    public void Dispose() {
+        session.Dispose();
     }
 }
