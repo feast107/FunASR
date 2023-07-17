@@ -1,5 +1,7 @@
 ﻿using AliFsmnSharp.Model;
 using AliFsmnSharp.Utils;
+using EasyPathology.Definitions.Extensions;
+using EasyPathology.Definitions.Models;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -42,7 +44,7 @@ public sealed class Paraformer : IDisposable {
     /// 推理，生成字幕
     /// </summary>
     /// <param name="samplesList"></param>
-    public IEnumerable<string> Inference(IEnumerable<float[]> samplesList) {
+    public IEnumerable<Subtitle> Inference(IEnumerable<float[]> samplesList) {
         foreach (var samplesBatch in samplesList.Chunk(batchSize)) {
             var (feats, featsCount) = frontend.ExtractFeat(samplesBatch);
 
@@ -53,26 +55,40 @@ public sealed class Paraformer : IDisposable {
             var speechLengthsDim = session.InputMetadata["speech_lengths"].Dimensions;
             speechLengthsDim[0] = featsCount.Length;
 
-            var outputs = session.Run(new[] {
-                NamedOnnxValue.CreateFromTensor("speech",
-                    new DenseTensor<float>(feats, speechDim)),
-                NamedOnnxValue.CreateFromTensor("speech_lengths",
-                    new DenseTensor<int>(featsCount, speechLengthsDim)),
-            }).ToList();
+            List<DisposableNamedOnnxValue> outputs;
+            try {
+                outputs = session.Run(new[] {
+                    NamedOnnxValue.CreateFromTensor("speech",
+                        new DenseTensor<float>(feats, speechDim)),
+                    NamedOnnxValue.CreateFromTensor("speech_lengths",
+                        new DenseTensor<int>(featsCount, speechLengthsDim)),
+                }).ToList();
+            } catch (OnnxRuntimeException) {
+                yield break;
+            }
 
             var amScores = outputs[0].AsTensor<float>().ToDenseTensor();
             var predicts = Decode(
                 amScores.Buffer, amScores.Dimensions,
                 outputs[1].AsTensor<int>().ToArray());
+            var usPeaks = outputs[3].AsTensor<float>().ToDenseTensor();
+            var usPackSliceLength = (int)usPeaks.Length / usPeaks.Dimensions[0];
+            foreach (var (i, predict) in predicts.WithIndex()) {
+                var usPeak = usPeaks.Buffer.Slice(i * usPackSliceLength, usPackSliceLength);
+                var timestamps = TimestampLfr6Onnx(usPeak, predict);
 
-            foreach (var predict in predicts) {
-                yield return string.Join(null, predict);
+                foreach (var zip in predict.Zip(timestamps).Chunk(15)) {
+                    yield return new Subtitle(
+                        string.Join(null, zip.Select(static z => z.First)),
+                        zip[0].Second.BeginTime,
+                        zip[^1].Second.EndTime);
+                }
             }
         }
     }
 
     private List<string[]> Decode(
-        Memory<float> amScores, 
+        Memory<float> amScores,
         ReadOnlySpan<int> amScoreDimensions,
         int[] validTokenLengths) {
         var results = new List<string[]>();
@@ -134,6 +150,82 @@ public sealed class Paraformer : IDisposable {
 
         return result;
     }
+
+    public record TimeWindow(TimeSpan BeginTime, TimeSpan EndTime);
+
+    private static List<TimeWindow> TimestampLfr6Onnx(
+        Memory<float> usPeaks,
+        string[] rawTokens,
+        float beginTime = 0.0f,
+        float totalOffset = -1.5f) {
+        const int StartEndThreshold = 5;
+        const int MaxTokenDuration = 30;
+        const double TimeRate = 10.0 * 6 / 1000 / 3;
+
+        var numFrames = usPeaks.Length;
+
+        var newCharList = new List<string>();
+        var timestampList = new List<TimeWindow>();
+
+        var firePlace = usPeaks.Span.ToArray()
+            .Select((value, index) => value > 1.0 - 1e-4 ? index : -1)
+            .Where(index => index != -1)
+            .Select(index => index + (int)totalOffset)
+            .ToList();
+
+        if (firePlace[0] > StartEndThreshold) {
+            timestampList.Add(new TimeWindow(TimeSpan.FromSeconds(0.0),
+                TimeSpan.FromSeconds(firePlace[0] * TimeRate)));
+            newCharList.Add("<sil>");
+        }
+
+        for (var i = 0; i < firePlace.Count - 1; i++) {
+            newCharList.Add(rawTokens[i]);
+
+            if (i == firePlace.Count - 2 ||
+                firePlace[i + 1] - firePlace[i] < MaxTokenDuration) {
+                timestampList.Add(new TimeWindow(TimeSpan.FromSeconds(firePlace[i] * TimeRate),
+                    TimeSpan.FromSeconds(firePlace[i + 1] * TimeRate)));
+            } else {
+                var split = firePlace[i] + MaxTokenDuration;
+
+                timestampList.Add(new TimeWindow(TimeSpan.FromSeconds(firePlace[i] * TimeRate),
+                    TimeSpan.FromSeconds(split * TimeRate)));
+                timestampList.Add(new TimeWindow(TimeSpan.FromSeconds(split * TimeRate),
+                    TimeSpan.FromSeconds(firePlace[i + 1] * TimeRate)));
+
+                newCharList.Add("<sil>");
+            }
+        }
+
+        if (numFrames - firePlace.Last() > StartEndThreshold) {
+            var end = (numFrames + firePlace.Last()) / 2.0;
+
+            var lastWindow = timestampList[^1];
+            timestampList[^1] = lastWindow with { EndTime = TimeSpan.FromSeconds(end * TimeRate) };
+            timestampList.Add(new TimeWindow(TimeSpan.FromSeconds(end * TimeRate),
+                TimeSpan.FromSeconds(numFrames * TimeRate)));
+
+            newCharList.Add("<sil>");
+        } else {
+            var lastWindow = timestampList[^1];
+            timestampList[^1] = lastWindow with { EndTime = TimeSpan.FromSeconds(numFrames * TimeRate) };
+        }
+
+        if (!(Math.Abs(beginTime) > 1e-6)) {
+            return timestampList.Where((_, index) => newCharList[index] != "<sil>").ToList();
+        }
+
+
+        for (var i = 0; i < timestampList.Count; i++) {
+            var window = timestampList[i];
+            timestampList[i] = new TimeWindow(window.BeginTime + TimeSpan.FromSeconds(beginTime / 1000.0),
+                window.EndTime + TimeSpan.FromSeconds(beginTime / 1000.0));
+        }
+
+        return timestampList.Where((_, index) => newCharList[index] != "<sil>").ToList();
+    }
+
 
     public void Dispose() {
         session.Dispose();

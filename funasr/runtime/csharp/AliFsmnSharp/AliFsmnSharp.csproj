@@ -37,4 +37,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\..\..\EasyPathology.Core\EasyPathology.Definitions\src\EasyPathology.Definitions.csproj" />
+  </ItemGroup>
+
 </Project>

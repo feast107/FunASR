@@ -32,7 +32,7 @@ public class UnitTests {
 
         var result = paraformer.Inference(new[] { floatArray }).First();
         Console.WriteLine(result);
-        Assert.That(result, Is.EqualTo("欢迎大家来体验达摩院推出的语音识别模型"));
+        Assert.That(result.Text, Is.EqualTo("欢迎大家来体验达摩院推出的语音识别模型"));
     }
 
     [Test]
@@ -98,6 +98,6 @@ public class UnitTests {
                 intraOpNumThreads: 4);
         var results = paraformer.Inference(segments).ToArray();
         Console.WriteLine($"Inference costs {sw.ElapsedMilliseconds}ms\n");
-        Console.WriteLine(string.Join("\n", results));
+        Console.WriteLine(string.Join("\n", results.Select(r => r.Text)));
     }
 }
