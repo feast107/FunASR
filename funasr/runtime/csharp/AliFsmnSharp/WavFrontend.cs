@@ -89,6 +89,10 @@ internal class WavFrontend {
     private static float[][] ApplyLfr(float[][] inputs, int lfrM, int lfrN) {
         var lfrInputs = new List<float[]>();
         var t = inputs.Length;
+        if (t == 0) {
+            return Array.Empty<float[]>();
+        }
+        
         var tLfr = (int)Math.Ceiling((double)t / lfrN);
         var leftPadding = Enumerable.Repeat(inputs[0], (lfrM - 1) / 2).ToArray();
         inputs = leftPadding.Concat(inputs).ToArray();
@@ -119,7 +123,15 @@ internal class WavFrontend {
         }
 
         var frame = inputs.Length;
+        if (frame == 0) {
+            return Array.Empty<float[]>();
+        }
+        
         var dim = inputs[0].Length;
+        if (dim == 0) {
+            return Array.Empty<float[]>();
+        }
+        
         var means = Enumerable.Range(0, frame).Select(_ => _cmvnEntity.Means.Take(dim).ToArray()).ToArray();
         var vars = Enumerable.Range(0, frame).Select(_ => _cmvnEntity.Vars.Take(dim).ToArray()).ToArray();
 
