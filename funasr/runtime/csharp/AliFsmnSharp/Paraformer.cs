@@ -76,12 +76,64 @@ public sealed class Paraformer : IDisposable {
             foreach (var (i, predict) in predicts.WithIndex()) {
                 var usPeak = usPeaks.Buffer.Slice(i * usPackSliceLength, usPackSliceLength);
                 var timestamps = TimestampLfr6Onnx(usPeak, predict);
+                if (timestamps.Count > 1) {
+                    // 有多个，根据时间戳进行断句
+                    var timestampDelta = new double[timestamps.Count - 1];
+                    for (var j = 0; j < timestampDelta.Length; j++) {
+                        timestampDelta[j] =
+                            (timestamps[j + 1].BeginTime - timestamps[j].EndTime).TotalMilliseconds;
+                    }
 
-                foreach (var zip in predict.Zip(timestamps).Chunk(15)) {
+                    var threshold = timestampDelta.Sum() / timestampDelta.Length * 2;
+                    var splitIndices = timestampDelta.WithIndex(1)
+                        .Where(x => x.Item2 > threshold)
+                        .Select(static x => x.Item1)
+                        .ToList();
+
+                    if (splitIndices.Count > 0 && splitIndices[0] == 1) {
+                        splitIndices.RemoveAt(0);
+                    }
+                    if (splitIndices.Count > 0 && splitIndices[^1] == timestampDelta.Length) {
+                        splitIndices.RemoveAt(splitIndices.Count - 1);
+                    }
+
+                    for (var j = 0; j < splitIndices.Count - 1; j++) {
+                        var gap = splitIndices[j + 1] - splitIndices[j];
+                        if (gap == 1) {
+                            splitIndices.RemoveAt(j + 1);
+                            j--;
+                            continue;  // 只有一个字符，不需要分割
+                        }
+                        
+                        if (gap <= 30) continue;
+                        
+                        // 如果两个断点之间的间隔大于30，那么将其分成若干个最长15个字符的句子
+                        while (gap > 15) {
+                            splitIndices.Insert(j + 1, splitIndices[j] + 15);
+                            gap -= 15;
+                            j++;
+                        }
+                    }
+
+                    for (var j = 0; j < splitIndices.Count; j++) {
+                        var begin = j == 0 ? 0 : splitIndices[j - 1];
+                        var end = splitIndices[j];
+                        yield return new Subtitle(
+                            string.Join(null, predict[begin..end]).Replace("@@", ""),
+                            timestamps[begin].BeginTime,
+                            timestamps[end].EndTime);
+                    }
+                    
+                    var lastIndex = splitIndices.Count == 0 ? 0 : splitIndices[^1];
                     yield return new Subtitle(
-                        string.Join(null, zip.Select(static z => z.First)),
-                        zip[0].Second.BeginTime,
-                        zip[^1].Second.EndTime);
+                        string.Join(null, predict[lastIndex..]).Replace("@@", ""),
+                        timestamps[lastIndex].BeginTime,
+                        timestamps[^1].EndTime);
+                } else {
+                    yield return new Subtitle(
+                        predict[0].Replace("@@", ""),
+                        timestamps[0].BeginTime,
+                        timestamps[^1].EndTime);
                 }
             }
         }
