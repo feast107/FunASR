@@ -4,6 +4,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Configurations>Debug;Release</Configurations>
+    <Platforms>x64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,25 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Lib\kaldi-native-fbank-dll.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-			<TargetPath>kaldi-native-fbank-dll.dll</TargetPath>
-    </None>
-    <None Update="speech_fsmn_vad_zh-cn-16k-common-pytorch\example\0.wav">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="speech_fsmn_vad_zh-cn-16k-common-pytorch\example\1.wav">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="speech_fsmn_vad_zh-cn-16k-common-pytorch\model.onnx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="speech_fsmn_vad_zh-cn-16k-common-pytorch\vad.mvn">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="speech_fsmn_vad_zh-cn-16k-common-pytorch\vad.yaml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="runtimes\win-x64\native\kaldi-native-fbank-dll.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -39,6 +22,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\..\..\EasyPathology.Core\EasyPathology.Definitions\src\EasyPathology.Definitions.csproj" />
+    <ProjectReference Include="..\KaldiNativeFbankSharp\kaldi-native-fbank-dll\kaldi-native-fbank-dll.vcxproj">
+      <!--不作为程序集引用-->
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
+
+  <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+    <Exec Command="xcopy /y $(ProjectDir)..\KaldiNativeFbankSharp\kaldi-native-fbank-dll\$(Platform)\$(Configuration)\kaldi-native-fbank-dll.dll $(ProjectDir)\runtimes\win-$(Platform)\native" />
+  </Target>
 
 </Project>

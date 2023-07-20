@@ -1,0 +1,4 @@
+
+[submodule "funasr/runtime/csharp/KaldiNativeFbankSharp"]
+	path = funasr/runtime/csharp/KaldiNativeFbankSharp
+	url = https://github.com/DearVa/KaldiNativeFbankSharp

@@ -419,3 +419,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+kaldi-native-fbank-dll.dll
