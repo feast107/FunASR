@@ -421,3 +421,4 @@ FodyWeavers.xsd
 *.sln.iml
 
 kaldi-native-fbank-dll.dll
+funasr/runtime/csharp/AliFsmnSharp/runtimes/win-x64/native/kaldi-native-fbank-dll.dll
